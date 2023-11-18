@@ -12,6 +12,9 @@ app.get('/', (req, res) => {
 app.post('/', (req, res) => {
   console.log("Received a post request!")
   console.log(req.body)
+  // check address from signedTransaction
+  // check transaction against what is allowed in the database
+  // add nonce to database
 })
 
 app.listen(port, () => {
