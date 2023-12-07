@@ -8,7 +8,7 @@ require('dotenv').config();
 // mock db_requests to return the results that I want
 jest.mock('./../database/db_requests')
 
-test("should allow a transaction that's allowed", async () => {
+test("should allow a transaction that's allowed (checkCondition only)", async () => {
     condition_list = [{
         max_gas_price: "FFFFFFFFFFFFFFFF",
         max_gas_limit: "FFFFFFFFFFFFFFFF",
@@ -26,3 +26,12 @@ test("should allow a transaction that's allowed", async () => {
 
 // TODO: check a complete set of permissions
 // lots of mocking, lots of code, so will leave for a different day (as of Nov 20)
+
+test("Should allow a legal transaction to pass, but only once despite many legal paths", async() => {
+    // this is easy enough to test
+})
+
+test("Should allow a transaction even when only one of many paths is legal", async () => {
+    // example is we want to disallow execute() commands unless they are targeting the Universal Router contract.
+    // alternatively, could look at an existing airdrop's transactions, and allow/disallow those as something more close to reality.
+})
