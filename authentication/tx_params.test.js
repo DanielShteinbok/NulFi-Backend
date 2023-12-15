@@ -6,7 +6,8 @@ const ethers = require("ethers");
 require('dotenv').config();
 
 // mock db_requests to return the results that I want
-jest.mock('./../database/db_requests')
+// perhaps don't mock it yet
+//jest.mock('./../database/db_requests')
 
 test("should allow a transaction that's allowed (checkCondition only)", async () => {
     condition_list = [{
@@ -16,9 +17,9 @@ test("should allow a transaction that's allowed (checkCondition only)", async ()
         max_vale: '0',
         data: ''
     }];
-    db_requests.query.mockResolvedValue(new Promise((resolve) => {
-        resolve({rows: condition_list})
-    }));
+//    db_requests.query.mockResolvedValue(new Promise((resolve) => {
+        //resolve({rows: condition_list})
+    //}));
     const tx_serialized = 'f868158502540be400825208940c54fccd2e384b4bb6f2e405bf5cbc15a017aafb80808401546d71a0cc02cda3b70183735fe69a5dafdbd91de69614c7eeb452d4edfa5ca8d11f7965a035e1960c849287421ead7a0ed482fb115bde95fb2492115f42a20e784fb1a12f';
     const tx = ethers.Transaction.from("0x" + tx_serialized);
     await expect(async () => {await tx_params.checkCondition('some condition id', tx)}).rejects.toThrow();
