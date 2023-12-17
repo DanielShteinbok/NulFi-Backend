@@ -142,7 +142,7 @@ function checkPermission(permission_id, transaction) {
     // throw_on=true necessary if the conditions are chained with OR or NAND
     // get the permission in question
     // DO need to get permission, this contains info on OR or AND etc
-    const permission_checker = new Promise(async (resolve) => {
+    const permission_checker = new Promise(async (resolve, reject) => {
         const permission = await getOnePermission(permission_id);
         switch (permission.requirement) {
             case 'or':
@@ -171,7 +171,8 @@ function checkPermission(permission_id, transaction) {
         })
         
         // check the condition Promises
-        Promise.all(conditions_to_check).then(() => {resolve(!eval_on_throw)}).catch((error) => {
+        //Promise.all(conditions_to_check).then(() => {resolve(!eval_on_throw)}).catch((error) => {
+        Promise.all(conditions_to_check).then(() => {resolve()}).catch((error) => {
             if (error instanceof errors.NotAnError) {
                 // then, we evaluated to eval_on_throw. Must call this function again with appropriate function
                 switch(eval_on_throw){
@@ -188,15 +189,17 @@ function checkPermission(permission_id, transaction) {
                 if (next == null) {
                     switch(eval_on_throw) {
                         case true:
-                            throw new errors.NotAnError("Condition met successfully")
+                            //throw new errors.NotAnError("Condition met successfully")
+                            reject();
                         case false:
                             resolve()
                     }
                 } else {
                     // create a Promise to recursively evaluate permissions
-                    new Promise((resolve) => {
-                        checkPermission(next, transaction, resolve)
-                    })
+                    //new Promise((resolve) => {
+                        //checkPermission(next, transaction, resolve)
+                    //})
+                    checkPermission(next, transaction).then(resolve, reject)
                 }
             } else {
                 throw error
@@ -206,7 +209,8 @@ function checkPermission(permission_id, transaction) {
     return permission_checker;
 }
 
-async function checkPermissions(auth_addr, transaction, callback_if_true, callback_if_false) {
+//async function checkPermissions(auth_addr, transaction, callback_if_true, callback_if_false) {
+async function checkPermissions(auth_addr, transaction) {
     const [user_id, wallet_address] = await getUserAndWallet(auth_addr);
     const groups = await getGroups(user_id);
     // can throw an error to stop execution once we have a successful path
@@ -227,7 +231,7 @@ async function checkPermissions(auth_addr, transaction, callback_if_true, callba
         //})
         // push a promise for each root permission, and that promise will throw when a child throws
         groups.forEach((group) => {
-            root_permissions_to_check.push(new Promise(async (resolve) => {
+            root_permissions_to_check.push(new Promise(async (resolve, reject) => {
                 var permissions_to_check = [];
                 permission_id_list = await getRootPermissionsForGroup(group.group_id, wallet_address);
                 //for (const permission_id in permission_id_list) {
@@ -235,7 +239,8 @@ async function checkPermissions(auth_addr, transaction, callback_if_true, callba
                     permissions_to_check.push(checkPermission(permission.permission_id, transaction));
                 });
                 Promise.all(permissions_to_check)
-                .then(resolve)
+                .then(resolve, () => {
+                    console.log("rejected!!!"); reject();})
                 .catch((error) => {
                     if (error instanceof errors.NotAnError) {
                         reject();
@@ -261,7 +266,8 @@ async function checkPermissions(auth_addr, transaction, callback_if_true, callba
             throw error
         });
     });
-    all_permission_checker.then(callback_if_true, callback_if_false);
+    //all_permission_checker.then(callback_if_true, callback_if_false);
+    return all_permission_checker
 }
 
 module.exports = {checkPermissions, checkCondition}

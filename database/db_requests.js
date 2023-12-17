@@ -13,7 +13,11 @@ async function query(query) {
     console.log(query)
     const result =  await client.query(query);
     // temporarily log the result
+    if (result == null) {
     console.log(result)
+    } else {
+    console.log(result.rows)
+    }
     client.release();
     return result;
 }
