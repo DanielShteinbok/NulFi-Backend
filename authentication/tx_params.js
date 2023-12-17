@@ -5,17 +5,24 @@ const ethers = require("ethers");
 const db_requests = require("./../database/db_requests")
 const errors = require("./../errors/errors")
 
+function asHex(string_val) {
+    if (string_val.substring(0, 2) != "0x") {
+        return "0x".concat(string_val);
+    } else {
+        return string_val;
+    }
+}
+
 async function getUserAndWallet(auth_addr) {
     const auth_wallet_pairs = (await db_requests.query(
-        "SELECT * from " + process.env.schema + ".auth_wallet_pairs WHERE auth_address='" + auth_addr + 
-    "' AND wallet_address='" + wallet_addr + "';")).rows;
+        "SELECT * from " + process.env.schema + ".auth_wallet_pairs WHERE auth_address='" + auth_addr + "';")).rows;
     // check that there is exactly one such pair
     if (auth_wallet_pairs.length == 0) {
-        throw errors.PermissionError("Unauthorized: Auth address" + auth_addr + " not authorized for wallet address " + wallet_addr);
+        throw errors.PermissionError("Unauthorized: Auth address" + auth_addr + " not authorized for any wallet address ");
     } else if (auth_wallet_pairs.length > 1){
         throw errors.DatabaseError("Database Error: multiple pairs exist for this auth address");
     }
-    return [auth_wallet_pairs[0].user_id, auth_wallet_pairs.wallet_address]
+    return [auth_wallet_pairs[0].user_id, auth_wallet_pairs[0].wallet_address]
 }
 
 async function getGroups(user_id) {
@@ -64,7 +71,7 @@ async function checkCondition(cond_id, transaction, throw_on=true) {
     // i.e. for an 8-byte uint256 we store 8 characters, so actually 64 bytes instead of 8.
     
     // get the condition
-    conditions = (await db_requests.query("SELECT * FROM" + process.env.schema + "conditions WHERE cond_id=" + cond_id)).rows;
+    const conditions = (await db_requests.query("SELECT * FROM " + process.env.schema + ".conditions WHERE cond_id=" + cond_id)).rows;
 
     // verify that we only have one condition
     if (conditions.length == 0) {
@@ -75,20 +82,27 @@ async function checkCondition(cond_id, transaction, throw_on=true) {
 
     check_result = (
         // ensure that the gas price is no more than max_gas_price
-        transaction.gasPrice > ethers.getUint("0x" + conditions[0].max_gas_price.toString())
+        //transaction.gasPrice > ethers.getUint("0x" + conditions[0].max_gas_price.toString())
+        transaction.gasPrice > ethers.getUint(asHex(conditions[0].max_gas_price.toString('hex')))
+        //transaction.gasPrice > ethers.getUint(conditions[0].max_gas_price)
 
         // ensure that the gas limit is no more than max_gas_limit
-        || transaction.gasLimit > ethers.getUint("0x" + conditions[0].max_gas_limit.toString())
+        //|| transaction.gasLimit > ethers.getUint("0x" + conditions[0].max_gas_limit.toString())
+        || transaction.gasLimit > ethers.getUint(asHex(conditions[0].max_gas_limit.toString('hex')))
+        //|| transaction.gasLimit > ethers.getUint(conditions[0].max_gas_limit)
 
 
         // ensure that the to matches a known address
-        || transaction.to != "0x" + conditions[0].send_to.toString()
+        //|| transaction.to != "0x" + conditions[0].send_to.toString()
+        || (conditions[0].send_to != null && transaction.to != asHex(conditions[0].send_to.toString()))
 
         // ensure that the value is no more than the max_value
-        || transaction.value > ethers.getUint("0x" + conditions[0].max_value.toString())
+        //|| transaction.value > ethers.getUint("0x" + conditions[0].max_value.toString())
+        //|| (transaction.value != null && transaction.value > ethers.getUint(asHex(conditions[0].max_value.toString()).substring(2)))
+        || (conditions[0].max_value != null && transaction.value > ethers.getUint(asHex(conditions[0].max_value.toString('hex'))))
 
         // ensure that the data matches the data we want
-        || !checkData(transaction.data.substring(2), conditions[0].data.toString())
+        || (conditions[0].data != null && !checkData(transaction.data.substring(2), conditions[0].data.toString()))
     );
 
     if (check_result == throw_on) {
@@ -122,96 +136,132 @@ async function checkCondition(cond_id, transaction, throw_on=true) {
 
 // traverse the tree of chained permissions and check each one
 // this is SHIT because we can't actually return a promise
-async function checkPermission(permission_id, transaction, resolve) {
+function checkPermission(permission_id, transaction) {
     // just a function that should run be run inside a Promise
     // DOES NOT RETURN ANYTHING
     // throw_on=true necessary if the conditions are chained with OR or NAND
     // get the permission in question
     // DO need to get permission, this contains info on OR or AND etc
-    const permission = await getOnePermission(permission_id);
-    switch (permission[0].requirement) {
-        case 'or':
-            throw_on = true;
-            eval_on_throw = true;
-        case 'and':
-            throw_on = false;
-            eval_on_throw = false;
-        case 'nor':
-            throw_on = true;
-            eval_on_throw = false;
-        case 'nand':
-            throw_on = false;
-            eval_on_throw = true;
-    }
+    const permission_checker = new Promise(async (resolve) => {
+        const permission = await getOnePermission(permission_id);
+        switch (permission.requirement) {
+            case 'or':
+                var throw_on = true;
+                var eval_on_throw = true;
+            case 'and':
+                var throw_on = false;
+                var eval_on_throw = false;
+            case 'nor':
+                var throw_on = true;
+                var eval_on_throw = false;
+            case 'nand':
+                var throw_on = false;
+                var eval_on_throw = true;
+        }
 
-    condition_ids = (await db_requests.query("SELECT * FROM " + process.env.schema + ".perm_cond_pairs WHERE permission_id='"
-    + permission_id + "';")).rows;
+        condition_pairs = (await db_requests.query("SELECT * FROM " + process.env.schema + ".perm_cond_pairs WHERE permission_id='"
+        + permission_id + "';")).rows;
 
-    // retrieve each condition, check it
-    var conditions_to_check = []
-    // put all the promises together
-    for (condition_pair in condition_ids) {
-        conditions_to_check.append(checkCondition(condition_pair.cond_id, transaction, throw_on));
-    }
-    
-    // check the condition Promises
-    Promise.all(conditions_satisfied).then(() => {resolve(!eval_on_throw)}).catch((error) => {
-        if (error instanceof errors.NotAnError) {
-            // then, we evaluated to eval_on_throw. Must call this function again with appropriate function
-            switch(eval_on_throw){
-                case true:
-                    next = permissions[0].next_if_true;
-                case false:
-                    next =  permissions[0].next_if_false;
-            }
-            // we've gotten to the end of the line. Does this mean we were successful or not?
-            // this depends on how the permission was evaluated. I define it as follows:
-            // at the end of the line, if permission evaluated to true then the permission is good and we can sign the transaction.
-            // if the permission evaluated to false, then the permission is bad and we don't sign the transaction right away,
-            // but perhaps a different permission will evaluate to true and result in signing.
-            if (next == null) {
-                switch(eval_on_throw) {
+        // retrieve each condition, check it
+        var conditions_to_check = []
+        // put all the promises together
+        //for (condition_pair in condition_ids) {
+        condition_pairs.forEach((condition_pair) => {
+            conditions_to_check.push(checkCondition(condition_pair.cond_id, transaction, throw_on));
+        })
+        
+        // check the condition Promises
+        Promise.all(conditions_to_check).then(() => {resolve(!eval_on_throw)}).catch((error) => {
+            if (error instanceof errors.NotAnError) {
+                // then, we evaluated to eval_on_throw. Must call this function again with appropriate function
+                switch(eval_on_throw){
                     case true:
-                        throw errors.NotAnError("Condition met successfully")
+                        var next = permission.next_if_true;
                     case false:
-                        resolve()
+                        var next =  permission.next_if_false;
+                }
+                // we've gotten to the end of the line. Does this mean we were successful or not?
+                // this depends on how the permission was evaluated. I define it as follows:
+                // at the end of the line, if permission evaluated to true then the permission is good and we can sign the transaction.
+                // if the permission evaluated to false, then the permission is bad and we don't sign the transaction right away,
+                // but perhaps a different permission will evaluate to true and result in signing.
+                if (next == null) {
+                    switch(eval_on_throw) {
+                        case true:
+                            throw new errors.NotAnError("Condition met successfully")
+                        case false:
+                            resolve()
+                    }
+                } else {
+                    // create a Promise to recursively evaluate permissions
+                    new Promise((resolve) => {
+                        checkPermission(next, transaction, resolve)
+                    })
                 }
             } else {
-                // create a Promise to recursively evaluate permissions
-                new Promise((resolve) => {
-                    checkPermission(next, transaction, resolve)
-                })
+                throw error
             }
-        } else {
-            throw error
-        }
+        })
     })
+    return permission_checker;
 }
-
 
 async function checkPermissions(auth_addr, transaction, callback_if_true, callback_if_false) {
     const [user_id, wallet_address] = await getUserAndWallet(auth_addr);
-    const groups = getGroups(user_id);
+    const groups = await getGroups(user_id);
     // can throw an error to stop execution once we have a successful path
     // otherwise need a list of promises and then we can use Promise.all() to see that all the promises returned
-    permissions_to_check = []
-    for (const group_id in groups) {
-        getRootPermissionsForGroup(group_id).then((permission_id_list) => {
-            for (const permission_id in permission_id_list) {
-                permissions_to_check.append(new Promise((resolve) => {checkPermission(permission_id, transaction, resolve)}));
-            }
-        })
+    //var permissions_to_check = []
+    const all_permission_checker = new Promise((resolve, reject) => {
+        var root_permissions_to_check = [];
+        //var root_permissions_to_check = []
+        //for (const group_id_holder in groups) {
+        //groups.forEach((group) => {
+            //getRootPermissionsForGroup(group.group_id, wallet_address).then((permission_id_list) => {
+                ////for (const permission_id in permission_id_list) {
+                //permission_id_list.forEach((permission) => {
+                    //permissions_to_check.push(new Promise((resolve) => {checkPermission(permission.permission_id, transaction, resolve)}));
+                //})
+            //})
 
-    }
-    // if everything is resolved and we haven't yet thrown a single true, they were all dead ends
-    // otherwise if something throws a NotAnError we know that a permission was satisfied
-    Promise.all(permissions_satisfied).then(callback_if_false).catch((error) => {
-        if (error instanceof errors.NotAnError) {
-            callback_if_true
-        } else {
+        //})
+        // push a promise for each root permission, and that promise will throw when a child throws
+        groups.forEach((group) => {
+            root_permissions_to_check.push(new Promise(async (resolve) => {
+                var permissions_to_check = [];
+                permission_id_list = await getRootPermissionsForGroup(group.group_id, wallet_address);
+                //for (const permission_id in permission_id_list) {
+                permission_id_list.forEach((permission) => {
+                    permissions_to_check.push(checkPermission(permission.permission_id, transaction));
+                });
+                Promise.all(permissions_to_check)
+                .then(resolve)
+                .catch((error) => {
+                    if (error instanceof errors.NotAnError) {
+                        reject();
+                    } else {
+                        throw error
+                    }
+                });
+                })
+            );
+        });
+
+        // if everything is resolved and we haven't yet thrown a single true, they were all dead ends
+        // otherwise if something throws a NotAnError we know that a permission was satisfied
+        Promise.all(root_permissions_to_check)
+        .then(reject, resolve)
+        .catch((error) => {
+            //console.log("caught the error");
+            //if (error instanceof errors.NotAnError) {
+                //resolve();
+            //} else {
+                //throw error
+            //}
             throw error
-        }
+        });
     });
+    all_permission_checker.then(callback_if_true, callback_if_false);
 }
 
 module.exports = {checkPermissions, checkCondition}

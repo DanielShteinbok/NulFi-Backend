@@ -16,8 +16,8 @@ try{
     // all these values must match for the condition to return true
     await client.query(
         "CREATE TABLE org_data.conditions(cond_id SERIAL PRIMARY KEY, \
-            max_gas_price bytea DEFAULT '\xFFFFFFFFFFFFFFFF', \
-            max_gas_limit bytea DEFAULT '\xFFFFFFFFFFFFFFFF', \
+            max_gas_price bytea DEFAULT '\xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', \
+            max_gas_limit bytea DEFAULT '\xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', \
             send_to bytea, max_value bytea, data text);"
     );
     await client.query(
