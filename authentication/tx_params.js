@@ -38,7 +38,7 @@ async function getGroups(user_id) {
 
 // have multiple root permissions for each (group, wallet) pair
 async function getRootPermissionsForGroup(group_id, wallet_addr) {
-    permissions = await db_requests.query("SELECT permission_id FROM " + process.env.schema + ".perm_pair WHERE address='" + wallet_addr
+    const permissions = await db_requests.query("SELECT permission_id FROM " + process.env.schema + ".perm_pair WHERE address='" + wallet_addr
     + "' AND group_id='" + group_id + "';")
     return permissions.rows
 }
@@ -144,19 +144,25 @@ function checkPermission(permission_id, transaction) {
     // DO need to get permission, this contains info on OR or AND etc
     const permission_checker = new Promise(async (resolve, reject) => {
         const permission = await getOnePermission(permission_id);
+        var throw_on;
+        var eval_on_throw;
         switch (permission.requirement) {
             case 'or':
-                var throw_on = true;
-                var eval_on_throw = true;
+                throw_on = true;
+                eval_on_throw = true;
+                break;
             case 'and':
-                var throw_on = false;
-                var eval_on_throw = false;
+                throw_on = false;
+                eval_on_throw = false;
+                break;
             case 'nor':
-                var throw_on = true;
-                var eval_on_throw = false;
+                throw_on = true;
+                eval_on_throw = false;
+                break;
             case 'nand':
-                var throw_on = false;
-                var eval_on_throw = true;
+                throw_on = false;
+                eval_on_throw = true;
+                break;
         }
 
         condition_pairs = (await db_requests.query("SELECT * FROM " + process.env.schema + ".perm_cond_pairs WHERE permission_id='"
@@ -192,7 +198,7 @@ function checkPermission(permission_id, transaction) {
                             //throw new errors.NotAnError("Condition met successfully")
                             reject();
                         case false:
-                            resolve()
+                            resolve();
                     }
                 } else {
                     // create a Promise to recursively evaluate permissions
