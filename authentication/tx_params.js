@@ -80,7 +80,8 @@ async function checkCondition(cond_id, transaction, throw_on=true) {
         throw errors.DatabaseError("More than one condition for this cond_id")
     }
 
-    check_result = (
+    // is false if any of the conditions is violated
+    check_result = !(
         // ensure that the gas price is no more than max_gas_price
         //transaction.gasPrice > ethers.getUint("0x" + conditions[0].max_gas_price.toString())
         transaction.gasPrice > ethers.getUint(asHex(conditions[0].max_gas_price.toString('hex')))
